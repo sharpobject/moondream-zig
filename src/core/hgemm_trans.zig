@@ -390,7 +390,7 @@ pub fn matmul(a: Tensor(f16), b_transposed: Tensor(f16), allocator: Allocator) !
         return error.IncompatibleTensorShapes;
     }
 
-    var result = try Tensor(f16).init(allocator, &[_]usize{ M, N });
+    var result = try Tensor(f16).initWithoutMemset(allocator, &[_]usize{ M, N });
     errdefer result.deinit();
 
     const A_data = a.getSlice();
@@ -522,7 +522,7 @@ fn matmulImpl(allocator: Allocator, a: []const f16, b_t: []const f16, c: []f16, 
 }
 pub fn transpose(allocator: std.mem.Allocator, tensor: Tensor(f16)) !Tensor(f16) {
     const shape = tensor.shape;
-    var result = try Tensor(f16).init(allocator, &[_]usize{ shape[1], shape[0] });
+    var result = try Tensor(f16).initWithoutMemset(allocator, &[_]usize{ shape[1], shape[0] });
     errdefer result.deinit();
 
     const src = tensor.getSlice();
