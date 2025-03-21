@@ -49,7 +49,7 @@ fn benchmarkSLayerNormInner(comptime T: type, comptime large_unroll: usize, comp
     const eps = 0.00001;
 
     // Warmup run
-    var warmup = try layerNormInner(T, large_unroll, large_unroll, stage2_unroll, false, a, g, b, eps);
+    var warmup = try layerNormInner(T, large_unroll, stage2_unroll, 4, false, a, g, b, eps);
     warmup.deinit();
 
     // Benchmark runs
@@ -60,7 +60,7 @@ fn benchmarkSLayerNormInner(comptime T: type, comptime large_unroll: usize, comp
 
     for (0..num_runs) |_| {
         var timer = try time.Timer.start();
-        var result = try layerNormInner(T, large_unroll, large_unroll, stage2_unroll, false, a, g, b, eps);
+        var result = try layerNormInner(T, large_unroll, stage2_unroll, 4, false, a, g, b, eps);
         const elapsed = timer.read();
         result.deinit();
 
@@ -241,10 +241,12 @@ pub fn benchmarkLayerNormGrid(T: type) !void {
 
         // Now run grid search over unroll factors (first_unroll, second_unroll)
         // Total unroll will range from 0 to 8, divided between first and second unroll
-        inline for (8..9) |first_unroll| {
+        inline for (0..9) |first_unroll| {
+            if (first_unroll != 1 and first_unroll != 0 and first_unroll != 8) continue;
             print("    Testing first unroll factor {d}...\n", .{first_unroll});
 
-            inline for (4..5) |second_unroll| {
+            //inline for (4..5) |second_unroll| {
+                const second_unroll = if (first_unroll < 2) (1-first_unroll) else 8;
                 // Benchmark YoloLN with these unroll factors
                 const yolo_result = try benchmarkSLayerNormInner(
                     T,
@@ -261,7 +263,7 @@ pub fn benchmarkLayerNormGrid(T: type) !void {
                     .second_unroll = @intCast(second_unroll),
                     .result = yolo_result,
                 });
-            }
+            //}
         }
 
         // Add results for this dimension
