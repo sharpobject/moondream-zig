@@ -66,7 +66,7 @@ pub fn rearrangeBCHWtoBTC(allocator: std.mem.Allocator, input: Tensor(f16), patc
 
 pub fn normalizePatch(allocator: Allocator, input: Tensor(f16), mean: Tensor(f16), stdev: Tensor(f16)) !Tensor(f16) {
     if (input.n_dims < 4) return error.InvalidInputShape;
-    var result = try Tensor(f16).init(allocator, input.shape());
+    var result = try Tensor(f16).init(allocator, input.shape_arr[0..input.n_dims]);
     errdefer result.deinit();
 
     const batch = input.shape_arr[0];

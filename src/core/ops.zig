@@ -305,9 +305,9 @@ fn transposeAxesGeneric(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1:
 }
 
 pub fn add(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
-    if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
-        std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
-        std.debug.print("other shape: {d}\n", .{other.shape()});
+    if (!std.mem.eql(usize, tensor.shape_arr[0..tensor.n_dims], other.shape_arr[0..other.n_dims])) {
+        std.debug.print("tensor shape: {d}\n", .{tensor.shape_arr[0..tensor.n_dims]});
+        std.debug.print("other shape: {d}\n", .{other.shape_arr[0..other.n_dims]});
         std.debug.print("Error during addition\n", .{});
         return error.ShapeMismatch;
     }
@@ -318,6 +318,9 @@ pub fn add(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
 }
 
 pub fn subtract(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
+    comptime {
+        unreachable;
+    }
     if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
         std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
         std.debug.print("other shape: {d}\n", .{other.shape()});
@@ -331,6 +334,9 @@ pub fn subtract(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
 }
 
 pub fn multiply(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
+    comptime {
+        unreachable;
+    }
     if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
         std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
         std.debug.print("other shape: {d}\n", .{other.shape()});
@@ -515,6 +521,9 @@ pub fn outer(comptime T: type, tensor: Tensor(T), other: Tensor(T)) !Tensor(T) {
 }
 
 pub fn accumulate(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
+    comptime {
+        unreachable;
+    }
     if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
         std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
         std.debug.print("other shape: {d}\n", .{other.shape()});

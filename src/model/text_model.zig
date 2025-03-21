@@ -138,7 +138,6 @@ pub fn TextModel(comptime model_config: Config) type {
 
         pub fn text_decoder(self: Self, input_embeds: Tensor(f16), kv_cache: ?*KVCacheType) !struct { output: Tensor(f16), cache: KVCacheType } {
             var hidden = try input_embeds.copy();
-            defer hidden.deinit();
 
             var new_cache = try KVCacheType.init(self.allocator);
             errdefer new_cache.deinit();

@@ -149,7 +149,7 @@ pub fn applyRotEmb(
     const half_rot = rot_dim / 2;
 
     // Allocate single output buffer
-    var output = try Tensor(f16).init(allocator, x.shape());
+    var output = try Tensor(f16).init(allocator, x.shape_arr[0..x.n_dims]);
     errdefer output.deinit();
 
     // Process in head-major order for better memory locality

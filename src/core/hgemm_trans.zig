@@ -401,8 +401,8 @@ pub fn matmul(a: Tensor(f16), b_transposed: Tensor(f16), allocator: Allocator) !
     @setFloatMode(.optimized);
     @setRuntimeSafety(false);
 
-    const A_shape = a.shape();
-    const B_t_shape = b_transposed.shape();
+    const A_shape = a.shape_arr[0..a.n_dims];
+    const B_t_shape = b_transposed.shape_arr[0..b_transposed.n_dims];
 
     // Input validation
     if (A_shape.len != 2 or B_t_shape.len != 2) {
@@ -554,7 +554,7 @@ pub fn transpose(allocator: std.mem.Allocator, tensor: Tensor(f16)) !Tensor(f16)
     @setRuntimeSafety(false);
     @setFloatMode(.optimized);
 
-    const shape = tensor.shape();
+    const shape = tensor.shape_arr[0..tensor.n_dims];
     var result = try Tensor(f16).initWithoutMemset(allocator, &[_]usize{ shape[1], shape[0] });
     errdefer result.deinit();
 
