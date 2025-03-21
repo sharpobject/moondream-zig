@@ -18,6 +18,11 @@ pub fn SlabReusingAllocator(comptime DEQUE_SIZE: usize) type {
         const NUM_BUCKETS = 64;
 
         backing_allocator: Allocator,
+        time_spent_waiting: usize = 0,
+        mutex: std.Thread.Mutex = .{},
+
+        // Tracks the original size of each allocation for later freeing
+        size_map: std.AutoHashMap(usize, usize),
 
         // Our caches of free slabs, organized by size class
         // For each bucket, we have a deque implemented as a circular buffer
@@ -25,9 +30,6 @@ pub fn SlabReusingAllocator(comptime DEQUE_SIZE: usize) type {
         tops: [NUM_BUCKETS]usize,  // Index of the top element + 1 (0 means empty)
         sizes: [NUM_BUCKETS]usize, // Number of elements in the deque
 
-        // Tracks the original size of each allocation for later freeing
-        size_map: std.AutoHashMap(usize, usize),
-        mutex: std.Thread.Mutex = .{},
 
         pub fn init(backing_allocator: Allocator) Self {
             const self = Self{
@@ -141,7 +143,10 @@ pub fn SlabReusingAllocator(comptime DEQUE_SIZE: usize) type {
             // Calculate the effective alignment - use at least PAGE_ALIGN for large allocations
             const alignment = @max(@as(usize, 1) << @as(math.Log2Int(usize), @intCast(log2_ptr_align)), PAGE_ALIGN);
 
+            var timer = std.time.Timer.start() catch unreachable;
             self.mutex.lock();
+            const time_spent_waiting = timer.read();
+            self.time_spent_waiting += time_spent_waiting;
             defer self.mutex.unlock();
 
             // For non-standard alignments, delegate to backing allocator
@@ -209,7 +214,10 @@ pub fn SlabReusingAllocator(comptime DEQUE_SIZE: usize) type {
             // Early return for null allocations
             if (ptr.len == 0) return;
 
+            var timer = std.time.Timer.start() catch unreachable;
             self.mutex.lock();
+            const time_spent_waiting = timer.read();
+            self.time_spent_waiting += time_spent_waiting;
             defer self.mutex.unlock();
 
             // Check if this is one of our cached allocations

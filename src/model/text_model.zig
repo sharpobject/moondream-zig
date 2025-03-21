@@ -104,16 +104,16 @@ pub fn TextModel(comptime model_config: Config) type {
 
         // Change the input type to u32
         pub fn text_encoder(self: Self, input_ids: Tensor(u32)) !Tensor(f16) {
-            if (input_ids.shape.len != 1) {
+            if (input_ids.n_dims != 1) {
                 return error.InvalidInputShape;
             }
 
-            const seq_length = input_ids.shape[0];
+            const seq_length = input_ids.shape_arr[0];
             if (seq_length > Self.config.seq_len) {
                 return error.SequenceTooLong;
             }
 
-            const embedding_dim = self.weights.word_token_embedding.shape[1];
+            const embedding_dim = self.weights.word_token_embedding.shape_arr[1];
 
             var output = try Tensor(f16).init(self.allocator, &[_]usize{ seq_length, embedding_dim });
             errdefer output.deinit();
@@ -143,7 +143,7 @@ pub fn TextModel(comptime model_config: Config) type {
             var new_cache = try KVCacheType.init(self.allocator);
             errdefer new_cache.deinit();
 
-            if (hidden.shape.len != 2) {
+            if (hidden.n_dims != 2) {
                 return error.InvalidInputShape;
             }
 
@@ -171,17 +171,15 @@ pub fn TextModel(comptime model_config: Config) type {
                 try ops.add(f16, &hidden, attn_out);
             }
 
-            var final_output = try hidden.copy();
-            errdefer final_output.deinit();
             return .{
-                .output = final_output,
+                .output = hidden,
                 .cache = new_cache,
             };
         }
 
         fn attention_block(self: Self, input: Tensor(f16), layer: usize, layer_cache: ?*LayerCache) !Tensor(f16) {
             const n_heads = Self.config.n_heads;
-            const seq_len = input.shape[0];
+            const seq_len = input.shape_arr[0];
             const rot_dim = Self.config.head_dim / 2;
             const pos = if (layer_cache) |cache| cache.getCurrentLen() else 0;
 
@@ -323,11 +321,11 @@ pub fn TextModel(comptime model_config: Config) type {
         }
 
         pub fn lm_head(self: Self, hidden: Tensor(f16)) !Tensor(f16) {
-            if (hidden.shape.len != 2) {
+            if (hidden.n_dims != 2) {
                 return error.InvalidInputShape;
             }
 
-            const seq_len = hidden.shape[0];
+            const seq_len = hidden.shape_arr[0];
             var last_hidden = try hidden.getDimensionSlice(0, seq_len - 1);
             defer last_hidden.deinit();
 

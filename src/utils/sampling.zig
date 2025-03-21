@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 /// Performs min-p sampling on a tensor of logits or probabilities
 // fn min_p_sampling(comptime T: type, tensor: *const Tensor(T), min_p: T, rng: std.rand.Random, allocator: Allocator) !usize {
-//     if (tensor.shape.len != 2 or tensor.shape[0] != 1) {
+//     if (tensor.n_dims != 2 or tensor.shape_arr[0] != 1) {
 //         return error.InvalidInputShape;
 //     }
 
@@ -112,11 +112,11 @@ const Allocator = std.mem.Allocator;
 // }
 
 fn min_p_sampling(tensor: *const Tensor(f32), min_p: f32, rng: std.rand.Random, allocator: Allocator) !usize {
-    if (tensor.shape.len != 2 or tensor.shape[0] != 1) {
+    if (tensor.n_dims != 2 or tensor.shape_arr[0] != 1) {
         return error.InvalidInputShape;
     }
 
-    const vocab_size = tensor.shape[1];
+    const vocab_size = tensor.shape_arr[1];
     const data = tensor.data;
 
     // Find max logit value for numerical stability (used in softmax)
@@ -219,7 +219,7 @@ fn min_p_sampling(tensor: *const Tensor(f32), min_p: f32, rng: std.rand.Random, 
 }
 
 pub fn sample_from_probs(comptime T: type, tensor: *Tensor(T), rng: std.rand.Random) !usize {
-    if (tensor.shape.len != 2 or tensor.shape[0] != 1) {
+    if (tensor.n_dims != 2 or tensor.shape_arr[0] != 1) {
         return error.InvalidInputShape;
     }
 
@@ -274,7 +274,7 @@ pub fn argmax(comptime T: type, tensor: *const Tensor(T)) !usize {
 
 /// Performs multinomial sampling on a tensor of probabilities
 fn multinomial_sampling(comptime T: type, tensor: *const Tensor(T), rng: std.rand.Random) !usize {
-    if (tensor.shape.len != 2 or tensor.shape[0] != 1) {
+    if (tensor.n_dims != 2 or tensor.shape_arr[0] != 1) {
         return error.InvalidInputShape;
     }
 
@@ -298,11 +298,11 @@ fn multinomial_sampling(comptime T: type, tensor: *const Tensor(T), rng: std.ran
 
 /// Performs top-k sampling on a tensor of probabilities
 fn top_k_sampling(comptime T: type, tensor: *const Tensor(T), k: usize, rng: std.rand.Random, allocator: Allocator) !usize {
-    if (tensor.shape.len != 2 or tensor.shape[0] != 1) {
+    if (tensor.n_dims != 2 or tensor.shape_arr[0] != 1) {
         return error.InvalidInputShape;
     }
 
-    const vocab_size = tensor.shape[1];
+    const vocab_size = tensor.shape_arr[1];
     const k_actual = @min(k, vocab_size);
 
     var indices = try std.ArrayList(usize).initCapacity(allocator, vocab_size);

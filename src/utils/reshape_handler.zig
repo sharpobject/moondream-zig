@@ -4,12 +4,12 @@ const Allocator = std.mem.Allocator;
 
 pub fn rearrangeBCHWtoBTC(allocator: std.mem.Allocator, input: Tensor(f16), patch_size: usize) !Tensor(f16) {
     // Input shape: [batch, channels, height, width]
-    if (input.shape.len != 4) return error.InvalidInputShape;
+    if (input.n_dims != 4) return error.InvalidInputShape;
 
-    const batch = input.shape[0];
-    const channels = input.shape[1];
-    const height = input.shape[2];
-    const width = input.shape[3];
+    const batch = input.shape_arr[0];
+    const channels = input.shape_arr[1];
+    const height = input.shape_arr[2];
+    const width = input.shape_arr[3];
 
     // Verify dimensions are divisible by patch size
     if (height % patch_size != 0 or width % patch_size != 0) {
@@ -65,13 +65,14 @@ pub fn rearrangeBCHWtoBTC(allocator: std.mem.Allocator, input: Tensor(f16), patc
 }
 
 pub fn normalizePatch(allocator: Allocator, input: Tensor(f16), mean: Tensor(f16), stdev: Tensor(f16)) !Tensor(f16) {
-    var result = try Tensor(f16).init(allocator, input.shape);
+    if (input.n_dims < 4) return error.InvalidInputShape;
+    var result = try Tensor(f16).init(allocator, input.shape());
     errdefer result.deinit();
 
-    const batch = input.shape[0];
-    const channels = input.shape[1];
-    const height = input.shape[2];
-    const width = input.shape[3];
+    const batch = input.shape_arr[0];
+    const channels = input.shape_arr[1];
+    const height = input.shape_arr[2];
+    const width = input.shape_arr[3];
 
     // Perform normalization in BCHW format (batch, channels, height, width)
     for (0..batch) |b| {
@@ -96,10 +97,11 @@ pub fn normalizePatch(allocator: Allocator, input: Tensor(f16), mean: Tensor(f16
 }
 
 pub fn convertBHWCtoBCHW(allocator: Allocator, input: Tensor(f16)) !Tensor(f16) {
-    const batch = input.shape[0];
-    const height = input.shape[1];
-    const width = input.shape[2];
-    const channels = input.shape[3];
+    if (input.n_dims < 4) return error.InvalidInputShape;
+    const batch = input.shape_arr[0];
+    const height = input.shape_arr[1];
+    const width = input.shape_arr[2];
+    const channels = input.shape_arr[3];
 
     var output = try Tensor(f16).init(allocator, &[_]usize{ batch, channels, height, width });
     errdefer output.deinit();

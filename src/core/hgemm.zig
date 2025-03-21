@@ -363,8 +363,8 @@ pub fn matmul(a: Tensor(f16), b: Tensor(f16), allocator: Allocator) !Tensor(f16)
     @setFloatMode(.optimized);
     @setRuntimeSafety(false);
 
-    const A_shape = a.shape;
-    const B_shape = b.shape;
+    const A_shape = a.shape();
+    const B_shape = b.shape();
 
     if (A_shape.len != 2 or B_shape.len != 2) {
         std.log.err("Incompatible Tensor Shapes, A shape : {any}, B shape {any}", .{ A_shape, B_shape });

@@ -192,7 +192,7 @@ pub fn VisionModel(comptime model_config: Config) type {
             var output_1 = try encoder_output.getDimensionSlice(0, 1);
             defer output_1.deinit();
 
-            var concat_output = try ops.concat(f16, output_0, output_1, output_0.shape.len - 1);
+            var concat_output = try ops.concat(f16, output_0, output_1, output_0.n_dims - 1);
             defer concat_output.deinit();
 
             var final_output = try self.encode_mlp(concat_output);
@@ -202,7 +202,7 @@ pub fn VisionModel(comptime model_config: Config) type {
         }
 
         pub fn vision_encoder(self: Self, input: Tensor(f16)) !Tensor(f16) {
-            const batch = input.shape[0];
+            const batch = input.shape_arr[0];
 
             if (batch != 2) {
                 std.log.err("Expected batch size 2, got {d}\n", .{batch});
@@ -212,29 +212,21 @@ pub fn VisionModel(comptime model_config: Config) type {
             var x = try rearrangeBCHWtoBTC(self.allocator, input, Self.config.patch_size);
             defer x.deinit();
 
-            const B = x.shape[0];
-            const M = x.shape[1];
-            const N = x.shape[2];
+            const B = x.shape_arr[0];
+            const M = x.shape_arr[1];
+            const N = x.shape_arr[2];
 
             try x.reshape(&[_]usize{ B * M, N });
             var projected = try hgemm.matmul(x, self.weights.v_patch_embedding_linear_w, self.allocator);
             defer projected.deinit();
 
             try ops.broadcast_add_simd(&projected, self.weights.v_patch_embedding_linear_b);
-            errdefer projected.deinit();
 
             try projected.reshape(&[_]usize{ B, M, Self.config.vit_dim });
-            errdefer projected.deinit();
             try ops.broadcast_add_simd(&projected, self.weights.v_pos_embedding);
-            errdefer projected.deinit();
 
             for (0..Self.config.n_vit_layers) |block| {
                 try projected.reshape(&[_]usize{ B * M, Self.config.vit_dim });
-                errdefer projected.deinit();
-
-                var x_orig = try projected.copy();
-                errdefer projected.deinit();
-                defer x_orig.deinit();
 
                 const ln1_w = self.presliced_weights.v_norm1_w[block];
                 const ln1_b = self.presliced_weights.v_norm1_b[block];
@@ -244,11 +236,7 @@ pub fn VisionModel(comptime model_config: Config) type {
                 var attn_out = try self.attention_block(ln1_out, block);
                 defer attn_out.deinit();
 
-                try ops.add(f16, &x_orig, attn_out);
-                @memcpy(projected.data, x_orig.data);
-
-                var pre_mlp = try projected.copy();
-                defer pre_mlp.deinit();
+                try ops.add(f16, &projected, attn_out);
 
                 const ln2_w = self.presliced_weights.v_norm2_w[block];
                 const ln2_b = self.presliced_weights.v_norm2_b[block];
@@ -258,15 +246,13 @@ pub fn VisionModel(comptime model_config: Config) type {
                 var mlp_out = try self.mlp(ln2_out, block);
                 defer mlp_out.deinit();
 
-                try ops.add(f16, &pre_mlp, mlp_out);
-                @memcpy(projected.data, pre_mlp.data);
+                try ops.add(f16, &projected, mlp_out);
             }
 
             try projected.reshape(&[_]usize{ B * M, Self.config.vit_dim });
             var final_out = try ops.layerNorm(f16, projected, self.weights.v_norm_out_w, self.weights.v_norm_out_b, eps);
             errdefer final_out.deinit();
             try final_out.reshape(&[_]usize{ B, M, Self.config.vit_dim });
-            errdefer final_out.deinit();
 
             return final_out;
         }

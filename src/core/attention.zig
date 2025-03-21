@@ -130,8 +130,8 @@ pub fn multiMasklessSDPA(
     value: Tensor(f16),
     allocator: Allocator,
 ) !Tensor(f16) {
-    const q_len = query.shape[1];
-    const kv_len = key.shape[1];
+    const q_len = query.shape_arr[1];
+    const kv_len = key.shape_arr[1];
 
     const scale: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim)));
 
@@ -234,7 +234,7 @@ pub fn multiMasklessSDPA(
 }
 // Helper function to copy head data
 fn copyHeadData(comptime T: type, dst: *Tensor(T), src: Tensor(T), head_idx: usize) !void {
-    const slice_size = src.shape[1] * src.shape[2];
+    const slice_size = src.shape_arr[1] * src.shape_arr[2];
     const start_idx = head_idx * slice_size;
     @memcpy(dst.data[0..slice_size], src.data[start_idx..][0..slice_size]);
 }
@@ -422,8 +422,8 @@ pub fn multiMaskedSDPA(
     head_dim: usize,
     allocator: Allocator,
 ) !Tensor(f16) {
-    const q_len = query.shape[1];
-    const kv_len = key.shape[1];
+    const q_len = query.shape_arr[1];
+    const kv_len = key.shape_arr[1];
 
     const scale: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim)));
 
@@ -490,7 +490,7 @@ pub fn multiMaskedSDPA(
 
                 for (0..ctx.q_len) |i| {
                     for (0..ctx.kv_len) |j| {
-                        const mask_idx = i * ctx.mask.shape[2] + j;
+                        const mask_idx = i * ctx.mask.shape_arr[2] + j;
                         const weights_idx = i * ctx.kv_len + j;
                         if (!ctx.mask.data[mask_idx]) {
                             workspace.attn_weights.data[weights_idx] = -std.math.inf(f32);
@@ -765,7 +765,7 @@ pub fn singleMaskedSDPA(
 ) !Tensor(f16) {
     @setFloatMode(.optimized);
 
-    const kv_len = key.shape[1];
+    const kv_len = key.shape_arr[1];
     if (kv_len > MAX_KV_LEN) return error.SequenceTooLong;
 
     // Initialize thread pool if needed

@@ -53,18 +53,18 @@ pub fn matmul(
     allocator: Allocator,
     num_threads: ?usize,
 ) !void {
-    if (a.shape.len != 2 or b.shape.len != 2) {
+    if (a.n_dims != 2 or b.n_dims != 2) {
         return error.InvalidDimensions;
     }
-    if (a.shape[1] != b.shape[0]) {
+    if (a.shape_arr[1] != b.shape_arr[0]) {
         return error.ShapeMismatch;
     }
 
-    const M = a.shape[0];
-    const N = b.shape[1];
-    const K = a.shape[1];
+    const M = a.shape_arr[0];
+    const N = b.shape_arr[1];
+    const K = a.shape_arr[1];
 
-    if (result.shape.len != 2 or result.shape[0] != M or result.shape[1] != N) {
+    if (result.n_dims != 2 or result.shape_arr[0] != M or result.shape_arr[1] != N) {
         return error.InvalidResultDimensions;
     }
 
@@ -95,9 +95,9 @@ fn optimizedMatmulF32InPlace(
 ) !void {
     @setRuntimeSafety(false);
 
-    const M = a.shape[0];
-    const N = b.shape[1];
-    const K = a.shape[1];
+    const M = a.shape_arr[0];
+    const N = b.shape_arr[1];
+    const K = a.shape_arr[1];
 
     const tiles_M = (M + Tile - 1) / Tile;
     const tiles_N = (N + Tile - 1) / Tile;

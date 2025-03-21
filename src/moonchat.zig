@@ -621,7 +621,17 @@ const ChatState = struct {
         const elapsed_ms = @as(f64, @floatFromInt(end_time - start_time)) / 1e6;
         const tokens_per_second = @as(f64, @floatFromInt(token_count)) / (elapsed_ms / 1000.0);
 
-        try stdout.print("\n{s}[{d:.1} tok/s]{s}\n\n", .{ stat_color, tokens_per_second, reset_color });
+        var real_allocator: *SlabReusingAllocator(100) = @ptrCast(@alignCast(self.allocator.ptr));
+        real_allocator.mutex.lock();
+        const time_spent_waiting = @as(f64,@floatFromInt(real_allocator.time_spent_waiting))/1e9;
+        real_allocator.time_spent_waiting = 0;
+        real_allocator.mutex.unlock(); 
+        try stdout.print("\n{s}[{d:.1} tok/s] [{d:.5}s spent waiting for mutex]{s}\n\n", .{
+            stat_color,
+            tokens_per_second,
+            time_spent_waiting,
+            reset_color
+        });
 
         // Reset KV cache
         self.kv_cache.deinit();

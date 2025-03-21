@@ -18,6 +18,7 @@ const FreqsError = error{
     EndTooSmall,
     ThetaTooSmall,
     InvalidShape,
+    TooManyDimensions,
 
     // Computation errors
     ComputationOverflow,
@@ -137,18 +138,18 @@ pub fn applyRotEmb(
     rot_dim: usize,
 ) !Tensor(f16) {
     // Validation remains the same
-    if (x.shape.len != 3) return error.InvalidInputDimensions;
-    if (rot_dim != freqs_cis.shape[freqs_cis.shape.len - 2] * 2) {
+    if (x.n_dims != 3) return error.InvalidInputDimensions;
+    if (rot_dim != freqs_cis.shape_arr[freqs_cis.n_dims - 2] * 2) {
         return error.InvalidRotationDimension;
     }
 
-    // const n_heads = x.shape[0];
-    const seq_len = x.shape[1];
-    // const head_dim = x.shape[2];
+    // const n_heads = x.shape_arr[0];
+    const seq_len = x.shape_arr[1];
+    // const head_dim = x.shape_arr[2];
     const half_rot = rot_dim / 2;
 
     // Allocate single output buffer
-    var output = try Tensor(f16).init(allocator, x.shape);
+    var output = try Tensor(f16).init(allocator, x.shape());
     errdefer output.deinit();
 
     // Process in head-major order for better memory locality

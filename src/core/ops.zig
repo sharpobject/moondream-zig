@@ -16,10 +16,10 @@ comptime {
 
 // Tensor Operations
 pub fn transpose(comptime T: type, tensor: *Tensor(T)) !void {
-    if (tensor.shape.len != 2) return error.UnsupportedDimension;
+    if (tensor.n_dims != 2) return error.UnsupportedDimension;
 
-    const rows = tensor.shape[0];
-    const cols = tensor.shape[1];
+    const rows = tensor.shape_arr[0];
+    const cols = tensor.shape_arr[1];
     var new_data = try tensor.allocator.alignedAlloc(@TypeOf(tensor.data[0]), 32, rows * cols);
 
     for (0..rows) |i| {
@@ -32,32 +32,32 @@ pub fn transpose(comptime T: type, tensor: *Tensor(T)) !void {
     tensor.data = new_data;
 
     // Swap dimensions
-    const temp = tensor.shape[0];
-    tensor.shape[0] = tensor.shape[1];
-    tensor.shape[1] = temp;
+    const temp = tensor.shape_arr[0];
+    tensor.shape_arr[0] = tensor.shape_arr[1];
+    tensor.shape_arr[1] = temp;
 }
 
 pub fn transposeAxes(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: usize) !void {
-    if (dim0 >= tensor.shape.len or dim1 >= tensor.shape.len) {
+    if (dim0 >= tensor.n_dims or dim1 >= tensor.n_dims) {
         return error.InvalidDimension;
     }
 
     // Calculate strides for the current shape
-    var strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(strides);
+    var strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const strides = strides_arr[0..tensor.n_dims];
 
-    strides[tensor.shape.len - 1] = 1;
-    var i: usize = tensor.shape.len - 1;
+    strides[tensor.n_dims - 1] = 1;
+    var i: usize = tensor.n_dims - 1;
     while (i > 0) : (i -= 1) {
-        strides[i - 1] = strides[i] * tensor.shape[i];
+        strides[i - 1] = strides[i] * tensor.shape_arr[i];
     }
 
     // Create new shape with swapped dimensions
-    var new_shape = try tensor.allocator.alloc(usize, tensor.shape.len);
-    errdefer tensor.allocator.free(new_shape);
+    var new_shape_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_shape = new_shape_arr[0..tensor.n_dims];
 
-    for (tensor.shape, 0..) |dim, idx| {
-        new_shape[idx] = if (idx == dim0) tensor.shape[dim1] else if (idx == dim1) tensor.shape[dim0] else dim;
+    for (tensor.shape_arr[0..tensor.n_dims], 0..) |dim, idx| {
+        new_shape[idx] = if (idx == dim0) tensor.shape_arr[dim1] else if (idx == dim1) tensor.shape_arr[dim0] else dim;
     }
 
     // Allocate memory for transposed data
@@ -65,23 +65,23 @@ pub fn transposeAxes(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: us
     errdefer tensor.allocator.free(new_data);
 
     // Calculate new strides - Moved before SIMD block
-    var new_strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(new_strides);
+    var new_strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_strides = new_strides_arr[0..tensor.n_dims];
 
-    new_strides[tensor.shape.len - 1] = 1;
-    i = tensor.shape.len - 1;
+    new_strides[tensor.n_dims - 1] = 1;
+    i = tensor.n_dims - 1;
     while (i > 0) : (i -= 1) {
         new_strides[i - 1] = new_strides[i] * new_shape[i];
     }
 
     // SIMD optimization wrapped in a block
     {
-        if (tensor.shape.len == 3 and dim0 == 0 and dim1 == 1 and
+        if (tensor.n_dims == 3 and dim0 == 0 and dim1 == 1 and
             (T == f16 or T == f32))
         {
-            const batch_size = tensor.shape[0];
-            const rows = tensor.shape[1];
-            const cols = tensor.shape[2];
+            const batch_size = tensor.shape_arr[0];
+            const rows = tensor.shape_arr[1];
+            const cols = tensor.shape_arr[2];
             const vector_size = if (T == f16) 16 else 8; // AVX2: 16 fp16 or 8 fp32
 
             if (cols >= vector_size) {
@@ -116,23 +116,21 @@ pub fn transposeAxes(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: us
 
                 tensor.allocator.free(tensor.data);
                 tensor.data = new_data;
-                tensor.allocator.free(tensor.shape);
-                tensor.shape = new_shape;
+                tensor.shape_arr = new_shape_arr;
                 return;
             }
         }
     }
 
     // General case implementation
-    var coords = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(coords);
-    @memset(coords, 0);
+    var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+    const coords = coords_arr[0..tensor.n_dims];
 
     const total_elements = tensor.data.len;
     var idx: usize = 0;
     while (idx < total_elements) : (idx += 1) {
         var remaining = idx;
-        for (0..tensor.shape.len) |dim| {
+        for (0..tensor.n_dims) |dim| {
             coords[dim] = remaining / new_strides[dim];
             remaining %= new_strides[dim];
         }
@@ -144,7 +142,7 @@ pub fn transposeAxes(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: us
 
         // Calculate source index
         var src_idx: usize = 0;
-        for (0..tensor.shape.len) |dim| {
+        for (0..tensor.n_dims) |dim| {
             src_idx += coords[dim] * strides[dim];
         }
 
@@ -153,8 +151,7 @@ pub fn transposeAxes(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: us
 
     tensor.allocator.free(tensor.data);
     tensor.data = new_data;
-    tensor.allocator.free(tensor.shape);
-    tensor.shape = new_shape;
+    tensor.shape_arr = new_shape_arr;
 }
 pub fn transposeF16SIMD(tensor: *Tensor(f16), batch_size: usize, rows: usize, cols: usize, new_data: []align(32) f16) void {
     const vec_size = 8;
@@ -244,23 +241,23 @@ pub fn transposeF16SIMD(tensor: *Tensor(f16), batch_size: usize, rows: usize, co
 
 fn transposeAxesGeneric(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1: usize) !void {
     // Original implementation for the general case
-    var strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(strides);
+    var strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const strides = strides_arr[0..tensor.n_dims];
 
-    strides[tensor.shape.len - 1] = 1;
-    var i: usize = tensor.shape.len - 1;
+    strides[tensor.n_dims - 1] = 1;
+    var i: usize = tensor.n_dims - 1;
     while (i > 0) : (i -= 1) {
-        strides[i - 1] = strides[i] * tensor.shape[i];
+        strides[i - 1] = strides[i] * tensor.shape_arr[i];
     }
 
-    var new_shape = try tensor.allocator.alloc(usize, tensor.shape.len);
-    errdefer tensor.allocator.free(new_shape);
+    var new_shape_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_shape = new_shape_arr[0..tensor.n_dims];
 
-    for (tensor.shape, 0..) |dim, idx| {
+    for (tensor.shape_arr[0..tensor.n_dims], 0..) |dim, idx| {
         if (idx == dim0) {
-            new_shape[idx] = tensor.shape[dim1];
+            new_shape[idx] = tensor.shape_arr[dim1];
         } else if (idx == dim1) {
-            new_shape[idx] = tensor.shape[dim0];
+            new_shape[idx] = tensor.shape_arr[dim0];
         } else {
             new_shape[idx] = dim;
         }
@@ -269,24 +266,23 @@ fn transposeAxesGeneric(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1:
     var new_data = try tensor.allocator.alignedAlloc(T, 32, tensor.data.len);
     errdefer tensor.allocator.free(new_data);
 
-    var new_strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(new_strides);
+    var new_strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_strides = new_strides_arr[0..tensor.n_dims];
 
-    new_strides[tensor.shape.len - 1] = 1;
-    i = tensor.shape.len - 1;
+    new_strides[tensor.n_dims - 1] = 1;
+    i = tensor.n_dims - 1;
     while (i > 0) : (i -= 1) {
         new_strides[i - 1] = new_strides[i] * new_shape[i];
     }
 
-    var coords = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(coords);
-    @memset(coords, 0);
+    var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+    const coords = coords_arr[0..tensor.n_dims];
 
     const total_elements = tensor.data.len;
     var idx: usize = 0;
     while (idx < total_elements) : (idx += 1) {
         var remaining = idx;
-        for (0..tensor.shape.len) |dim| {
+        for (0..tensor.n_dims) |dim| {
             coords[dim] = remaining / new_strides[dim];
             remaining = remaining % new_strides[dim];
         }
@@ -296,7 +292,7 @@ fn transposeAxesGeneric(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1:
         coords[dim1] = temp;
 
         var src_idx: usize = 0;
-        for (0..tensor.shape.len) |dim| {
+        for (0..tensor.n_dims) |dim| {
             src_idx += coords[dim] * strides[dim];
         }
 
@@ -305,14 +301,13 @@ fn transposeAxesGeneric(comptime T: type, tensor: *Tensor(T), dim0: usize, dim1:
 
     tensor.allocator.free(tensor.data);
     tensor.data = new_data;
-    tensor.allocator.free(tensor.shape);
-    tensor.shape = new_shape;
+    tensor.shape_arr = new_shape_arr;
 }
 
 pub fn add(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
-    if (!std.mem.eql(usize, tensor.shape, other.shape)) {
-        std.debug.print("tensor shape: {d}\n", .{tensor.shape});
-        std.debug.print("other shape: {d}\n", .{other.shape});
+    if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
+        std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
+        std.debug.print("other shape: {d}\n", .{other.shape()});
         std.debug.print("Error during addition\n", .{});
         return error.ShapeMismatch;
     }
@@ -323,9 +318,9 @@ pub fn add(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
 }
 
 pub fn subtract(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
-    if (!std.mem.eql(usize, tensor.shape, other.shape)) {
-        std.debug.print("tensor shape: {d}\n", .{tensor.shape});
-        std.debug.print("other shape: {d}\n", .{other.shape});
+    if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
+        std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
+        std.debug.print("other shape: {d}\n", .{other.shape()});
         std.debug.print("Error during subtraction\n", .{});
         return error.ShapeMismatch;
     }
@@ -336,9 +331,9 @@ pub fn subtract(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
 }
 
 pub fn multiply(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
-    if (!std.mem.eql(usize, tensor.shape, other.shape)) {
-        std.debug.print("tensor shape: {d}\n", .{tensor.shape});
-        std.debug.print("other shape: {d}\n", .{other.shape});
+    if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
+        std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
+        std.debug.print("other shape: {d}\n", .{other.shape()});
         std.debug.print("Error during multiplication\n", .{});
         return error.ShapeMismatch;
     }
@@ -364,29 +359,25 @@ pub fn scalarMultiply(comptime T: type, tensor: *Tensor(T), scalar: T) void {
 /// The smaller tensor is broadcast to match the shape of the larger tensor along
 /// matching dimensions from right to left.
 /// For example: [seq_len, dim] + [dim] -> broadcasts [dim] across seq_len
-/// Performs broadcasted addition between two tensors.
-/// The smaller tensor is broadcast to match the shape of the larger tensor along
-/// matching dimensions from right to left.
-/// For example: [seq_len, dim] + [dim] -> broadcasts [dim] across seq_len
 pub fn broadcast_add(comptime T: type, a: *Tensor(T), b: Tensor(T)) !void {
     // Check that shapes can be broadcast
-    if (b.shape.len > a.shape.len) {
+    if (b.n_dims > a.n_dims) {
         return error.InvalidBroadcast;
     }
 
     // Check that dimensions match from right to left
-    for (0..b.shape.len) |i| {
-        const a_dim = a.shape[a.shape.len - 1 - i];
-        const b_dim = b.shape[b.shape.len - 1 - i];
+    for (0..b.n_dims) |i| {
+        const a_dim = a.shape_arr[a.n_dims - 1 - i];
+        const b_dim = b.shape_arr[b.n_dims - 1 - i];
         if (b_dim != a_dim and b_dim != 1) {
             return error.IncompatibleBroadcast;
         }
     }
 
     // For common case of [seq_len, dim] + [dim]
-    if (a.shape.len == 2 and b.shape.len == 1 and b.shape[0] == a.shape[1]) {
-        const seq_len = a.shape[0];
-        const dim = a.shape[1];
+    if (a.n_dims == 2 and b.n_dims == 1 and b.shape_arr[0] == a.shape_arr[1]) {
+        const seq_len = a.shape_arr[0];
+        const dim = a.shape_arr[1];
 
         // Add bias to each row
         var i: usize = 0;
@@ -412,27 +403,27 @@ pub fn broadcast_add(comptime T: type, a: *Tensor(T), b: Tensor(T)) !void {
     var i: usize = 0;
     while (i < total_elements) : (i += 1) {
         // Calculate indices for both tensors
-        var a_coords = try a.allocator.alloc(usize, a.shape.len);
-        defer a.allocator.free(a_coords);
+        var a_coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+        const a_coords = a_coords_arr[0..a.n_dims];
         var temp = i;
 
         // Convert flat index to coordinates
-        for (0..a.shape.len) |j| {
-            const rev_j = a.shape.len - 1 - j;
-            a_coords[rev_j] = temp % a.shape[rev_j];
-            temp /= a.shape[rev_j];
+        for (0..a.n_dims) |j| {
+            const rev_j = a.n_dims - 1 - j;
+            a_coords[rev_j] = temp % a.shape_arr[rev_j];
+            temp /= a.shape_arr[rev_j];
         }
 
         // Calculate corresponding b index
         var b_idx: usize = 0;
         var b_stride: usize = 1;
 
-        for (0..b.shape.len) |j| {
-            const b_j = b.shape.len - 1 - j;
-            const a_j = a.shape.len - 1 - j;
-            const coord = a_coords[a_j] % b.shape[b_j];
+        for (0..b.n_dims) |j| {
+            const b_j = b.n_dims - 1 - j;
+            const a_j = a.n_dims - 1 - j;
+            const coord = a_coords[a_j] % b.shape_arr[b_j];
             b_idx += coord * b_stride;
-            b_stride *= b.shape[b_j];
+            b_stride *= b.shape_arr[b_j];
         }
 
         // Add values
@@ -477,16 +468,16 @@ pub fn broadcast_subtract(comptime T: type, a: *Tensor(T), b: Tensor(T)) !void {
 }
 
 pub fn matmul(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !Tensor(T) {
-    if (tensor.shape.len != 2 or other.shape.len != 2) {
+    if (tensor.n_dims != 2 or other.n_dims != 2) {
         return error.UnsupportedDimension;
     }
-    if (tensor.shape[1] != other.shape[0]) {
+    if (tensor.shape_arr[1] != other.shape_arr[0]) {
         return error.IncompatibleDimensions;
     }
 
-    const m = tensor.shape[0];
-    const k = tensor.shape[1];
-    const n = other.shape[1];
+    const m = tensor.shape_arr[0];
+    const k = tensor.shape_arr[1];
+    const n = other.shape_arr[1];
 
     var result = try Tensor(@TypeOf(tensor.data[0])).init(tensor.allocator, &[_]usize{ m, n });
 
@@ -504,12 +495,12 @@ pub fn matmul(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !Tensor(T)
 }
 
 pub fn outer(comptime T: type, tensor: Tensor(T), other: Tensor(T)) !Tensor(T) {
-    if (tensor.shape.len != 1 or other.shape.len != 1) {
+    if (tensor.n_dims != 1 or other.n_dims != 1) {
         return error.InvalidDimensions;
     }
 
-    const m = tensor.shape[0];
-    const n = other.shape[0];
+    const m = tensor.shape_arr[0];
+    const n = other.shape_arr[0];
 
     var result = try Tensor(@TypeOf(tensor.data[0])).init(tensor.allocator, &[_]usize{ m, n });
     errdefer result.deinit();
@@ -524,9 +515,9 @@ pub fn outer(comptime T: type, tensor: Tensor(T), other: Tensor(T)) !Tensor(T) {
 }
 
 pub fn accumulate(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void {
-    if (!std.mem.eql(usize, tensor.shape, other.shape)) {
-        std.debug.print("tensor shape: {d}\n", .{tensor.shape});
-        std.debug.print("other shape: {d}\n", .{other.shape});
+    if (!std.mem.eql(usize, tensor.shape(), other.shape())) {
+        std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
+        std.debug.print("other shape: {d}\n", .{other.shape()});
         std.debug.print("Error during accumulation\n", .{});
         return error.ShapeMismatch;
     }
@@ -547,11 +538,11 @@ pub fn accumulate(comptime T: type, tensor: *Tensor(T), other: Tensor(T)) !void 
 /// we get 3 tensors of shape [2,2]
 pub fn getChunk(comptime T: type, tensor: Tensor(T), dim: usize, chunk_idx: usize, num_chunks: usize) !Tensor(T) {
     // Validate inputs
-    if (dim >= tensor.shape.len) {
+    if (dim >= tensor.n_dims) {
         return error.InvalidDimension;
     }
 
-    const dim_size = tensor.shape[dim];
+    const dim_size = tensor.shape_arr[dim];
     if (num_chunks == 0 or dim_size < num_chunks) {
         return error.InvalidNumChunks;
     }
@@ -569,49 +560,47 @@ pub fn getChunk(comptime T: type, tensor: Tensor(T), dim: usize, chunk_idx: usiz
     const start_idx = chunk_idx * chunk_size;
 
     // Create new shape array
-    var new_shape = try tensor.allocator.alloc(usize, tensor.shape.len);
-    errdefer tensor.allocator.free(new_shape);
+    var new_shape_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_shape = new_shape_arr[0..tensor.n_dims];
 
-    for (tensor.shape, 0..) |s, i| {
+    for (tensor.shape_arr[0..tensor.n_dims], 0..) |s, i| {
         new_shape[i] = if (i == dim) chunk_size else s;
     }
 
     // Create result tensor
     var result = try Tensor(T).init(tensor.allocator, new_shape);
-    tensor.allocator.free(new_shape);
     errdefer result.deinit();
 
     // Calculate strides for the input tensor
-    var strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(strides);
+    var strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const strides = strides_arr[0..tensor.n_dims];
 
-    strides[tensor.shape.len - 1] = 1;
-    var i = tensor.shape.len - 1;
+    strides[tensor.n_dims - 1] = 1;
+    var i = tensor.n_dims - 1;
     while (i > 0) : (i -= 1) {
-        strides[i - 1] = strides[i] * tensor.shape[i];
+        strides[i - 1] = strides[i] * tensor.shape_arr[i];
     }
 
     // Copy data
     const total_elements = result.data.len;
     var result_idx: usize = 0;
-    var coords = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(coords);
-    @memset(coords, 0);
+    var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+    const coords = coords_arr[0..tensor.n_dims];
 
     while (result_idx < total_elements) : (result_idx += 1) {
         // Calculate source coordinates
         var temp = result_idx;
         var src_idx: usize = 0;
 
-        for (0..tensor.shape.len) |j| {
-            const rev_j = tensor.shape.len - 1 - j;
+        for (0..tensor.n_dims) |j| {
+            const rev_j = tensor.n_dims - 1 - j;
             if (rev_j == dim) {
                 coords[rev_j] = temp % chunk_size + start_idx;
             } else {
-                coords[rev_j] = temp % tensor.shape[rev_j];
+                coords[rev_j] = temp % tensor.shape_arr[rev_j];
             }
             src_idx += coords[rev_j] * strides[rev_j];
-            temp /= if (rev_j == dim) chunk_size else tensor.shape[rev_j];
+            temp /= if (rev_j == dim) chunk_size else tensor.shape_arr[rev_j];
         }
 
         result.data[result_idx] = tensor.data[src_idx];
@@ -711,41 +700,39 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
     try verifyCompatibleForConcat(T, tensor, other, dim);
 
     // Calculate new shape
-    var new_shape = try tensor.allocator.alloc(usize, tensor.shape.len);
-    errdefer tensor.allocator.free(new_shape);
+    var new_shape_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_shape = new_shape_arr[0..tensor.n_dims];
 
-    for (tensor.shape, 0..) |s, i| {
-        new_shape[i] = if (i == dim) s + other.shape[i] else s;
+    for (tensor.shape_arr[0..tensor.n_dims], 0..) |s, i| {
+        new_shape[i] = if (i == dim) s + other.shape_arr[i] else s;
     }
 
     // Create new tensor with combined shape
     var result = try Tensor(T).init(tensor.allocator, new_shape);
     errdefer result.deinit();
-    tensor.allocator.free(new_shape);
 
     // Early return for zero-sized tensors
-    if (calculateSize(result.shape) == 0) {
+    if (calculateSize(result.shape_arr[0..result.n_dims]) == 0) {
         return result;
     }
 
     // Helper function to get strides
-    var strides = try tensor.allocator.alloc(usize, tensor.shape.len);
-    defer tensor.allocator.free(strides);
+    var strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const strides = strides_arr[0..tensor.n_dims];
 
     // Calculate strides for the result tensor
     strides[strides.len - 1] = 1;
     var i: usize = strides.len - 1;
     while (i > 0) {
         i -= 1;
-        strides[i] = strides[i + 1] * result.shape[i + 1];
+        strides[i] = strides[i + 1] * result.shape_arr[i + 1];
     }
 
     // Copy data from first tensor
-    const first_size = calculateSize(tensor.shape);
+    const first_size = calculateSize(tensor.shape_arr[0..tensor.n_dims]);
     if (first_size > 0) {
-        var coords = try tensor.allocator.alloc(usize, tensor.shape.len);
-        defer tensor.allocator.free(coords);
-        @memset(coords, 0);
+        var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+        const coords = coords_arr[0..tensor.n_dims];
 
         var idx: usize = 0;
         while (idx < first_size) : (idx += 1) {
@@ -755,19 +742,19 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
 
             for (coords, 0..) |c, j| {
                 if (j == dim) {
-                    src_idx += c * (if (j + 1 < tensor.shape.len) blk: {
+                    src_idx += c * (if (j + 1 < tensor.n_dims) blk: {
                         var prod: usize = 1;
-                        for (j + 1..tensor.shape.len) |k| {
-                            prod *= tensor.shape[k];
+                        for (j + 1..tensor.n_dims) |k| {
+                            prod *= tensor.shape_arr[k];
                         }
                         break :blk prod;
                     } else 1);
                     dst_idx += c * strides[j];
                 } else {
-                    src_idx += c * (if (j + 1 < tensor.shape.len) blk: {
+                    src_idx += c * (if (j + 1 < tensor.n_dims) blk: {
                         var prod: usize = 1;
-                        for (j + 1..tensor.shape.len) |k| {
-                            prod *= tensor.shape[k];
+                        for (j + 1..tensor.n_dims) |k| {
+                            prod *= tensor.shape_arr[k];
                         }
                         break :blk prod;
                     } else 1);
@@ -781,18 +768,17 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
             while (j > 0) {
                 j -= 1;
                 coords[j] += 1;
-                if (coords[j] < tensor.shape[j]) break;
+                if (coords[j] < tensor.shape_arr[j]) break;
                 coords[j] = 0;
             }
         }
     }
 
     // Copy data from second tensor
-    const second_size = calculateSize(other.shape);
+    const second_size = calculateSize(other.shape_arr[0..other.n_dims]);
     if (second_size > 0) {
-        var coords = try tensor.allocator.alloc(usize, other.shape.len);
-        defer tensor.allocator.free(coords);
-        @memset(coords, 0);
+        var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+        const coords = coords_arr[0..other.n_dims];
 
         var idx: usize = 0;
         while (idx < second_size) : (idx += 1) {
@@ -802,19 +788,19 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
 
             for (coords, 0..) |c, j| {
                 if (j == dim) {
-                    src_idx += c * (if (j + 1 < other.shape.len) blk: {
+                    src_idx += c * (if (j + 1 < other.n_dims) blk: {
                         var prod: usize = 1;
-                        for (j + 1..other.shape.len) |k| {
-                            prod *= other.shape[k];
+                        for (j + 1..other.n_dims) |k| {
+                            prod *= other.shape_arr[k];
                         }
                         break :blk prod;
                     } else 1);
-                    dst_idx += (c + tensor.shape[dim]) * strides[j];
+                    dst_idx += (c + tensor.shape_arr[dim]) * strides[j];
                 } else {
-                    src_idx += c * (if (j + 1 < other.shape.len) blk: {
+                    src_idx += c * (if (j + 1 < other.n_dims) blk: {
                         var prod: usize = 1;
-                        for (j + 1..other.shape.len) |k| {
-                            prod *= other.shape[k];
+                        for (j + 1..other.n_dims) |k| {
+                            prod *= other.shape_arr[k];
                         }
                         break :blk prod;
                     } else 1);
@@ -828,7 +814,7 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
             while (j > 0) {
                 j -= 1;
                 coords[j] += 1;
-                if (coords[j] < other.shape[j]) break;
+                if (coords[j] < other.shape_arr[j]) break;
                 coords[j] = 0;
             }
         }
@@ -839,20 +825,20 @@ pub fn concat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize)
 
 fn verifyCompatibleForConcat(comptime T: type, tensor: Tensor(T), other: Tensor(T), dim: usize) !void {
     // Check if dimension is valid
-    if (dim >= tensor.shape.len) {
+    if (dim >= tensor.n_dims) {
         return error.InvalidDimension;
     }
 
     // Check if tensors have same number of dimensions
-    if (tensor.shape.len != other.shape.len) {
+    if (tensor.n_dims != other.n_dims) {
         return error.DimensionMismatch;
     }
 
     // Check if all dimensions except concat dim are equal
-    for (tensor.shape, 0..) |s, i| {
-        if (i != dim and s != other.shape[i]) {
-            std.debug.print("tensor shape: {d}\n", .{tensor.shape});
-            std.debug.print("other shape: {d}\n", .{other.shape});
+    for (tensor.shape_arr[0..tensor.n_dims], 0..) |s, i| {
+        if (i != dim and s != other.shape_arr[i]) {
+            std.debug.print("tensor shape: {d}\n", .{tensor.shape()});
+            std.debug.print("other shape: {d}\n", .{other.shape()});
             return error.IncompatibleShapes;
         }
     }
@@ -901,19 +887,18 @@ pub fn stack(comptime T: type, tensors: []const Tensor(T), dim: usize) !Tensor(T
     ref_tensor.allocator.free(new_shape);
 
     // Calculate strides for the result tensor
-    var strides = try ref_tensor.allocator.alloc(usize, result.shape.len);
-    defer ref_tensor.allocator.free(strides);
+    var strides_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const strides = strides_arr[0..result.n_dims];
 
     strides[strides.len - 1] = 1;
     var i = strides.len - 1;
     while (i > 0) : (i -= 1) {
-        strides[i - 1] = strides[i] * result.shape[i];
+        strides[i - 1] = strides[i] * result.shape_arr[i];
     }
 
     // Copy data from each input tensor
-    var coords = try ref_tensor.allocator.alloc(usize, result.shape.len);
-    defer ref_tensor.allocator.free(coords);
-    @memset(coords, 0);
+    var coords_arr: [Tensor(T).MAX_DIMS]usize = .{0} ** Tensor(T).MAX_DIMS;
+    const coords = coords_arr[0..result.n_dims];
 
     const elements_per_tensor = calculateSize(ref_shape);
 
@@ -953,7 +938,7 @@ pub fn stack(comptime T: type, tensors: []const Tensor(T), dim: usize) !Tensor(T
                 k -= 1;
                 if (k == dim) continue; // Skip the stacked dimension
                 coords[k] += 1;
-                if (coords[k] < result.shape[k]) break;
+                if (coords[k] < result.shape_arr[k]) break;
                 coords[k] = 0;
             }
         }
@@ -978,8 +963,8 @@ pub fn normalizeDim(dim: isize, n_dims: usize) !usize {
 /// Flattens dimensions from start_dim to end_dim (inclusive)
 /// TODO: Convert to tensor intrinsic
 pub fn flatten(comptime T: type, tensor: *Tensor(T), start_dim: isize, end_dim: isize) !void {
-    const positive_start = try normalizeDim(start_dim, tensor.shape.len);
-    const positive_end = try normalizeDim(end_dim, tensor.shape.len);
+    const positive_start = try normalizeDim(start_dim, tensor.n_dims);
+    const positive_end = try normalizeDim(end_dim, tensor.n_dims);
 
     if (positive_start > positive_end) {
         return error.InvalidDimRange;
@@ -988,31 +973,31 @@ pub fn flatten(comptime T: type, tensor: *Tensor(T), start_dim: isize, end_dim: 
     // Calculate the size of the flattened dimension
     var flat_size: usize = 1;
     for (positive_start..positive_end + 1) |i| {
-        flat_size *= tensor.shape[i];
+        flat_size *= tensor.shape_arr[i];
     }
 
     // Create new shape
-    const new_shape_len = tensor.shape.len - (positive_end - positive_start);
-    var new_shape = try tensor.allocator.alloc(usize, new_shape_len);
-    errdefer tensor.allocator.free(new_shape);
+    const new_shape_len = tensor.n_dims - (positive_end - positive_start);
+    var new_shape_arr: [Tensor(T).MAX_DIMS]usize = undefined;
+    const new_shape = new_shape_arr[0..new_shape_len];
 
     // Copy dimensions before flattened dimensions
-    @memcpy(new_shape[0..positive_start], tensor.shape[0..positive_start]);
+    @memcpy(new_shape[0..positive_start], tensor.shape_arr[0..positive_start]);
 
     // Add flattened dimension
     new_shape[positive_start] = flat_size;
 
     // Copy dimensions after flattened dimensions
-    if (positive_end + 1 < tensor.shape.len) {
+    if (positive_end + 1 < tensor.n_dims) {
         @memcpy(
             new_shape[positive_start + 1 ..],
-            tensor.shape[positive_end + 1 ..],
+            tensor.shape_arr[positive_end + 1 ..],
         );
     }
 
     // Free old shape and update with new shape
-    tensor.allocator.free(tensor.shape);
-    tensor.shape = new_shape;
+    tensor.shape_arr = new_shape_arr;
+    tensor.n_dims = new_shape_len;
 }
 
 // Usage example:
@@ -1021,7 +1006,7 @@ pub fn stackAndFlatten(comptime T: type, r: Tensor(T), i: Tensor(T), dim: isize)
     const positive_dim = if (dim >= 0)
         @as(usize, @intCast(dim))
     else blk: {
-        const n_dims: isize = @intCast(r.shape.len);
+        const n_dims: isize = @intCast(r.n_dims);
         // -1 means last dimension + 1 (where we'll insert)
         const adjusted_dim = n_dims + 1 + dim;
         if (adjusted_dim < 0) return error.InvalidDimension;
@@ -1034,7 +1019,7 @@ pub fn stackAndFlatten(comptime T: type, r: Tensor(T), i: Tensor(T), dim: isize)
     errdefer result.deinit();
 
     // Flatten the last two dimensions
-    try flatten(T, &result, @intCast(result.shape.len - 2), @intCast(result.shape.len - 1));
+    try flatten(T, &result, @intCast(result.n_dims - 2), @intCast(result.n_dims - 1));
 
     return result;
 }
@@ -1163,6 +1148,7 @@ pub fn layerNormInner(
     bias: Tensor(T),
     eps: T) !Tensor(T)
 {
+    //std.log.err("I do a softmax of {d} elements!", .{input.data.len});
     // Check input stability
     if (CHECK_EVERYTHING) {
         try checkStability(T, input);
@@ -1176,21 +1162,21 @@ pub fn layerNormInner(
     }
 
     // Input validation
-    if (input.shape.len < 1) {
+    if (input.n_dims < 1) {
         return error.InvalidShape;
     }
-    const last_dim = input.shape[input.shape.len - 1];
+    const last_dim = input.shape_arr[input.n_dims - 1];
 
-    if (weight.shape.len != 1 or weight.shape[0] != last_dim) {
+    if (weight.n_dims != 1 or weight.shape_arr[0] != last_dim) {
         return error.InvalidWeightShape;
     }
-    if (bias.shape.len != 1 or bias.shape[0] != last_dim) {
+    if (bias.n_dims != 1 or bias.shape_arr[0] != last_dim) {
         return error.InvalidBiasShape;
     }
 
     // Calculate size of dimensions before the last dimension
     var leading_dims: usize = 1;
-    for (input.shape[0 .. input.shape.len - 1]) |dim| {
+    for (input.shape_arr[0 .. input.n_dims - 1]) |dim| {
         leading_dims *= dim;
     }
 
@@ -1438,21 +1424,21 @@ pub fn layerNormOldInner(comptime T: type, comptime ET: type,input: Tensor(T), w
     }
 
     // Input validation
-    if (input.shape.len < 1) {
+    if (input.n_dims < 1) {
         return error.InvalidShape;
     }
-    const last_dim = input.shape[input.shape.len - 1];
+    const last_dim = input.shape_arr[input.n_dims - 1];
 
-    if (weight.shape.len != 1 or weight.shape[0] != last_dim) {
+    if (weight.n_dims != 1 or weight.shape_arr[0] != last_dim) {
         return error.InvalidWeightShape;
     }
-    if (bias.shape.len != 1 or bias.shape[0] != last_dim) {
+    if (bias.n_dims != 1 or bias.shape_arr[0] != last_dim) {
         return error.InvalidBiasShape;
     }
 
     // Calculate size of dimensions before the last dimension
     var leading_dims: usize = 1;
-    for (input.shape[0 .. input.shape.len - 1]) |dim| {
+    for (input.shape_arr[0 .. input.n_dims - 1]) |dim| {
         leading_dims *= dim;
     }
 
@@ -1546,18 +1532,19 @@ const LayerNormError = error{
 } || StabilityError;
 
 pub fn softmax(tensor: *Tensor(f32), dim: usize, allocator: Allocator) !void {
-    const dim_size = tensor.shape[dim];
+    //std.log.err("I do a softmax of {d} elements!", .{tensor.data.len});
+    const dim_size = tensor.shape_arr[dim];
 
     // Calculate stride for the specified dimension
     var stride: usize = 1;
-    for (dim + 1..tensor.shape.len) |i| {
-        stride *= tensor.shape[i];
+    for (dim + 1..tensor.n_dims) |i| {
+        stride *= tensor.shape_arr[i];
     }
 
     // Calculate number of vectors to process
     var num_vectors: usize = 1;
     for (0..dim) |i| {
-        num_vectors *= tensor.shape[i];
+        num_vectors *= tensor.shape_arr[i];
     }
 
     // Allocate temporary buffer for exponentials
@@ -1779,28 +1766,28 @@ pub fn gelu(comptime T: type, tensor: *Tensor(T)) !void {
 
 pub fn broadcast_add_simd(a: *Tensor(f16), b: Tensor(f16)) !void {
     // Validate broadcast compatibility
-    if (b.shape.len > a.shape.len) {
+    if (b.n_dims > a.n_dims) {
         return error.InvalidBroadcast;
     }
 
     // Check dimensions match from right to left
-    for (0..b.shape.len) |i| {
-        const a_dim = a.shape[a.shape.len - 1 - i];
-        const b_dim = b.shape[b.shape.len - 1 - i];
+    for (0..b.n_dims) |i| {
+        const a_dim = a.shape_arr[a.n_dims - 1 - i];
+        const b_dim = b.shape_arr[b.n_dims - 1 - i];
         if (b_dim != a_dim and b_dim != 1) {
             return error.IncompatibleBroadcast;
         }
     }
 
     // Special case for positional embeddings [B,M,N] + [1,M,N]
-    if (a.shape.len == 3 and b.shape.len == 3 and
-        b.shape[0] == 1 and
-        b.shape[1] == a.shape[1] and
-        b.shape[2] == a.shape[2])
+    if (a.n_dims == 3 and b.n_dims == 3 and
+        b.shape_arr[0] == 1 and
+        b.shape_arr[1] == a.shape_arr[1] and
+        b.shape_arr[2] == a.shape_arr[2])
     {
-        const batch = a.shape[0];
-        const seq_len = a.shape[1];
-        const dim = a.shape[2];
+        const batch = a.shape_arr[0];
+        const seq_len = a.shape_arr[1];
+        const dim = a.shape_arr[2];
         const elements_per_batch = seq_len * dim;
 
         // AVX2 uses 8 x f32 vectors
@@ -1857,9 +1844,9 @@ pub fn broadcast_add_simd(a: *Tensor(f16), b: Tensor(f16)) !void {
     }
 
     // Special case for [seq_len, dim] + [dim]
-    if (a.shape.len == 2 and b.shape.len == 1 and b.shape[0] == a.shape[1]) {
-        const seq_len = a.shape[0];
-        const dim = a.shape[1];
+    if (a.n_dims == 2 and b.n_dims == 1 and b.shape_arr[0] == a.shape_arr[1]) {
+        const seq_len = a.shape_arr[0];
+        const dim = a.shape_arr[1];
 
         // AVX2 uses 8 x f32 vectors
         const Vec = @Vector(8, f32);
@@ -1915,34 +1902,34 @@ pub fn broadcast_add_simd(a: *Tensor(f16), b: Tensor(f16)) !void {
     // Fallback for general case
     const total_elements = blk: {
         var prod: usize = 1;
-        for (a.shape) |dim| {
+        for (a.shape_arr[0..a.n_dims]) |dim| {
             prod *= dim;
         }
         break :blk prod;
     };
 
-    var a_coords = try a.allocator.alloc(usize, a.shape.len);
-    defer a.allocator.free(a_coords);
+    var a_coords_arr: [Tensor(f16).MAX_DIMS]usize = .{0} ** Tensor(f16).MAX_DIMS;
+    const a_coords = a_coords_arr[0..a.n_dims];
 
     var i: usize = 0;
     while (i < total_elements) : (i += 1) {
         var temp = i;
 
-        for (0..a.shape.len) |j| {
-            const rev_j = a.shape.len - 1 - j;
-            a_coords[rev_j] = temp % a.shape[rev_j];
-            temp /= a.shape[rev_j];
+        for (0..a.n_dims) |j| {
+            const rev_j = a.n_dims - 1 - j;
+            a_coords[rev_j] = temp % a.shape_arr[rev_j];
+            temp /= a.shape_arr[rev_j];
         }
 
         var b_idx: usize = 0;
         var b_stride: usize = 1;
 
-        for (0..b.shape.len) |j| {
-            const b_j = b.shape.len - 1 - j;
-            const a_j = a.shape.len - 1 - j;
-            const coord = a_coords[a_j] % b.shape[b_j];
+        for (0..b.n_dims) |j| {
+            const b_j = b.n_dims - 1 - j;
+            const a_j = a.n_dims - 1 - j;
+            const coord = a_coords[a_j] % b.shape_arr[b_j];
             b_idx += coord * b_stride;
-            b_stride *= b.shape[b_j];
+            b_stride *= b.shape_arr[b_j];
         }
 
         // Convert to f32, add, then back to f16
