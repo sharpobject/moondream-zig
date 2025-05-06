@@ -1149,6 +1149,15 @@ inline fn welfordMerge(comptime T: type, na: *T, ma: *T, m2a: *T, nb: T, mb: T, 
     m2a.* += m2b + n_prod_delta2_over_n;
 }
 
+inline fn welfordMergeNEqual(comptime T: type, half_na: T, ma: *T, m2a: *T, mb: T, m2b: T) void {
+    @setFloatMode(.optimized);
+    const delta = mb - ma.*;
+    const delta2 = delta * delta;
+    ma.* += delta * @splat(@as(T, 0.5));
+    m2a.* += m2b;
+    m2a.* += delta2 * half_na;
+}
+
 pub fn layerNormInner(
     comptime T: type,
     // number of unrolls of one type for welford's algorithm update
